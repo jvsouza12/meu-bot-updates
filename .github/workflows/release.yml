@@ -1,0 +1,103 @@
+name: Build and Release Windows EXE
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  APP_NAME: AUTO By ]BETANO
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Definir versão da execução
+        id: version
+        shell: pwsh
+        run: |
+          $version = "1.0.${{ github.run_number }}"
+
+          (Get-Content src/__init__.py) `
+            -replace '__version__ = "[^"]+"', `
+            "__version__ = `"$version`"" `
+            | Set-Content src/__init__.py
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Verificar sintaxe Python
+        run: |
+          python -m py_compile app.py
+          python -m py_compile src\auth_db.py
+          python -m py_compile src\auth_ui.py
+          python -m py_compile src\automation.py
+          python -m py_compile src\hotkey_manager.py
+          python -m py_compile src\interface.py
+          python -m py_compile src\keyboard_controller.py
+          python -m py_compile src\keymap.py
+          python -m py_compile src\settings_manager.py
+          python -m py_compile src\supabase_client.py
+          python -m py_compile src\updater.py
+          python -m py_compile src\visual_clicker.py
+
+      - name: Gerar AUTO By ]BETANO.exe
+        run: >-
+          pyinstaller
+          --noconfirm
+          --clean
+          --onefile
+          --windowed
+          --name "AUTO By ]BETANO"
+          --add-data "assets;assets"
+          --icon "assets/icon.ico"
+          app.py
+
+      - name: Verificar executável
+        shell: pwsh
+        run: |
+          if (!(Test-Path "dist/AUTO By ]BETANO.exe")) {
+            Write-Error "AUTO By ]BETANO.exe não foi gerado."
+            exit 1
+          }
+
+      - name: Calcular SHA-256
+        id: hash
+        shell: pwsh
+        run: |
+          $hash = (
+            Get-FileHash `
+              "dist/AUTO By ]BETANO.exe" `
+              -Algorithm SHA256
+          ).Hash.ToLower()
+
+          "hash=$hash" >> $env:GITHUB_OUTPUT
+          "SHA256: $hash" | Out-File release-notes.txt -Encoding utf8
+
+      - name: Criar Release e publicar EXE
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: AUTO By ]BETANO v${{ steps.version.outputs.version }}
+          body_path: release-notes.txt
+          files: "dist/AUTO By ]BETANO.exe"
+          generate_release_notes: true
